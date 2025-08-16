@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}  # Default value if not set
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}  # Default value
+      POSTGRES_DB: ${DB_NAME:-microservice_db}  # Default value
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./auth-service/db-init:/docker-entrypoint-initdb.d  # Critical mount
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-microservice_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  auth-service:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      DB_NAME: ${DB_NAME:-microservice_db}
+      DB_HOST: postgres
+      DB_PORT: '5432'
+      JWT_SECRET: ${JWT_SECRET:-default_secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  payment-service:
+    build:
+      context: ./payment-service
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      DB_NAME: ${DB_NAME:-microservice_db}
+      DB_HOST: postgres
+      DB_PORT: '5432'
+      JWT_SECRET: ${JWT_SECRET:-default_secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

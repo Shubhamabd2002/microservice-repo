@@ -2,16 +2,20 @@ services:
   postgres:
     image: postgres:13
     environment:
-      POSTGRES_USER: ${DB_USER:-postgres}  # Default value if not set
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}  # Default value
-      POSTGRES_DB: ${DB_NAME:-microservice_db}  # Default value
+      POSTGRES_USER: ${DB_USER:-postgres} # Default value if not set
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret} # Default value
+      POSTGRES_DB: ${DB_NAME:-microservice_db} # Default value
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./auth-service/db-init:/docker-entrypoint-initdb.d  # Critical mount
+      - ./auth-service/db-init:/docker-entrypoint-initdb.d # Critical mount
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-microservice_db}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-microservice_db}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -27,8 +31,9 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-secret}
       DB_NAME: ${DB_NAME:-microservice_db}
       DB_HOST: postgres
-      DB_PORT: '5432'
+      DB_PORT: "5432"
       JWT_SECRET: ${JWT_SECRET:-default_secret}
+        - CORS_ORIGIN=http://localhost:5173
     depends_on:
       postgres:
         condition: service_healthy
@@ -44,8 +49,9 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-secret}
       DB_NAME: ${DB_NAME:-microservice_db}
       DB_HOST: postgres
-      DB_PORT: '5432'
+      DB_PORT: "5432"
       JWT_SECRET: ${JWT_SECRET:-default_secret}
+        - CORS_ORIGIN=http://localhost:5173
     depends_on:
       postgres:
         condition: service_healthy

@@ -1,54 +1,104 @@
+version: "3.9"
+
+networks:
+  microservices-net:
+    name: microservices-net
+    driver: bridge
+
+volumes:
+  postgres_data:
+  grafana_data:
+  prometheus_data:
+
 services:
   postgres:
     image: postgres:13
     environment:
-      POSTGRES_USER: ${DB_USER:-postgres}  # Default value if not set
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}  # Default value
-      POSTGRES_DB: ${DB_NAME:-microservice_db}  # Default value
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+      POSTGRES_DB: ${DB_NAME:-microservice_db}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./auth-service/db-init:/docker-entrypoint-initdb.d  # Critical mount
+      - ./auth-service/db-init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-microservice_db}"]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - microservices-net
 
   auth-service:
     build:
       context: ./auth-service
       dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
     environment:
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-secret}
       DB_NAME: ${DB_NAME:-microservice_db}
       DB_HOST: postgres
-      DB_PORT: '5432'
+      DB_PORT: "5432"
       JWT_SECRET: ${JWT_SECRET:-default_secret}
+      PORT: "3000"
+    ports:
+      - "3000:3000"   # optional for host access
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - microservices-net
 
   payment-service:
     build:
       context: ./payment-service
       dockerfile: Dockerfile
-    ports:
-      - "3001:3001"
     environment:
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-secret}
       DB_NAME: ${DB_NAME:-microservice_db}
       DB_HOST: postgres
-      DB_PORT: '5432'
+      DB_PORT: "5432"
       JWT_SECRET: ${JWT_SECRET:-default_secret}
+      PORT: "3001"
+    ports:
+      - "3001:3001"   # optional for host access
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - microservices-net
 
-volumes:
-  postgres_data:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      # Mount the file from a clean, relative path. Ensure this file exists.
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    depends_on:
+      - auth-service
+      - payment-service
+    networks:
+      - microservices-net
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    ports:
+      - "3005:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - microservices-net
+ 

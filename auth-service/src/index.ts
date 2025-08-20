@@ -3,6 +3,8 @@ import { Pool } from 'pg';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prometheus from 'prom-client';
+import { AuthRequestDTO, AuthRequestSchema, RefreshRequestSchema, RegisterRequestSchema, TokenResponseDTO, TokenResponseSchema } from "./auth.schema";
+import z from 'zod';
 
 interface User {
   id: number;
@@ -27,6 +29,7 @@ interface LoginRequestBody {
 interface JwtPayload {
   userId: number;
 }
+interface ErrorResponse { error: any };
 
 // Create a custom registry
 const register = new prometheus.Registry();
@@ -119,14 +122,16 @@ async function instrumentedQuery<T>(queryText: string, values?: any[]) {
 }
 
 // Register endpoint
-app.post('/register', async (req: Request<{}, {}, RegisterRequestBody>, res: Response) => {
-  try {
-    const { username, password } = req.body;
-    
-    if (!username || !password) {
-      return res.status(400).json({ error: 'Username and password are required' });
-    }
+app.post('/register', async (req: any, res: any) => {
+  const parsed = RegisterRequestSchema.safeParse(req.body);
 
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error });
+  }
+
+  const { username, password } = parsed.data;
+
+  try {
     const hashedPassword = await bcrypt.hash(password, 10);
     
     const result = await instrumentedQuery<User>(
@@ -147,34 +152,89 @@ app.post('/register', async (req: Request<{}, {}, RegisterRequestBody>, res: Res
   }
 });
 
-// Login endpoint
-app.post('/login', async (req: Request<{}, {}, LoginRequestBody>, res: Response) => {
-  try {
-    const { username, password } = req.body;
-    
-    if (!username || !password) {
-      return res.status(400).json({ error: 'Username and password are required' });
-    }
 
-    const user = await instrumentedQuery<User>(
-      'SELECT * FROM users WHERE username = $1', 
-      [username]
+// Login endpoint
+app.post(
+  "/login",
+  async (
+    req: Request<{}, {}, AuthRequestDTO>,
+    res: Response<TokenResponseDTO | ErrorResponse>
+  ) => {
+    try {
+      // ✅ Validate body with zod
+      const parseResult = AuthRequestSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        // New recommended way: return errors directly or use zod-error utils
+        return res.status(400).json({
+          error: parseResult.error,
+        });
+      }
+
+      const { username, password } = parseResult.data;
+
+      // ✅ Check user in DB
+      const user = await instrumentedQuery<User>(
+        "SELECT * FROM users WHERE username = $1",
+        [username]
+      );
+
+      if (user.rows.length === 0) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      const isValid = await bcrypt.compare(password, user.rows[0].password);
+      if (!isValid) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      // ✅ Generate tokens
+      const accessToken = jwt.sign(
+        { userId: user.rows[0].id },
+        JWT_SECRET,
+        { expiresIn: "15m" }
+      );
+      const refreshToken = jwt.sign(
+        { userId: user.rows[0].id },
+        JWT_SECRET,
+        { expiresIn: "7d" }
+      );
+
+      // ✅ Validate response before sending
+      const validatedResponse = TokenResponseSchema.parse({
+        accessToken,
+        refreshToken,
+      });
+
+      return res.json(validatedResponse);
+    } catch (err) {
+      console.error("Login error:", err);
+      return res.status(500).json({ error: "Login failed" });
+    }
+  }
+);
+
+app.post('/refresh', (req: Request, res: Response) => {
+  const parseResult = RefreshRequestSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    return res.status(400).json({
+      error: parseResult.error.message, // <-- array of issues
+    });
+  }
+
+  const { refreshToken } = parseResult.data;
+
+  try {
+    const decoded = jwt.verify(refreshToken, JWT_SECRET) as JwtPayload;
+
+    const newAccessToken = jwt.sign(
+      { userId: decoded.userId },
+      JWT_SECRET,
+      { expiresIn: '15m' }
     );
-    
-    if (user.rows.length === 0) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-    
-    const isValid = await bcrypt.compare(password, user.rows[0].password);
-    if (!isValid) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-    
-    const token = jwt.sign({ userId: user.rows[0].id }, JWT_SECRET, { expiresIn: '1h' });
-    res.json({ token });
-  } catch (err: unknown) {
-    console.error('Login error:', err);
-    res.status(500).json({ error: 'Login failed' });
+
+    res.json({ accessToken: newAccessToken });
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid refresh token' });
   }
 });
 

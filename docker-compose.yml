@@ -43,7 +43,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-default_secret}
       PORT: "3000"
     ports:
-      - "3000:3000"   # optional for host access
+      - "3000:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -63,7 +63,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-default_secret}
       PORT: "3001"
     ports:
-      - "3001:3001"   # optional for host access
+      - "3001:3001"
     depends_on:
       postgres:
         condition: service_healthy
@@ -79,7 +79,6 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      # Mount the file from a clean, relative path. Ensure this file exists.
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     depends_on:
@@ -101,4 +100,3 @@ services:
       - prometheus
     networks:
       - microservices-net
- 

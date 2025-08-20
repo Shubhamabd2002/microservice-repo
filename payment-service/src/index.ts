@@ -118,20 +118,44 @@ async function instrumentedQuery<T>(queryText: string, values?: any[]) {
 
 // Middleware to verify JWT
 const authenticate = (req: AuthRequest, res: Response, next: NextFunction) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  
-  if (!token) {
-    return res.status(401).json({ error: 'No token provided' });
+  const accessToken = req.headers.authorization?.split(' ')[1];
+  const refreshToken = req.headers['x-refresh-token'] as string | undefined;
+
+  if (!accessToken) {
+    return res.status(401).json({ error: 'No access token provided' });
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as CustomJwtPayload;
+    // ✅ Verify access token
+    const decoded = jwt.verify(accessToken, JWT_SECRET) as CustomJwtPayload;
     req.userId = decoded.userId;
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: 'Invalid token' });
+    return next();
+  } catch (err: any) {
+    if (err.name === 'TokenExpiredError' && refreshToken) {
+      try {
+        // ✅ Verify refresh token
+        const decodedRefresh = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET || 'your-refresh-secret') as CustomJwtPayload;
+        req.userId = decodedRefresh.userId;
+
+        // 🔄 Generate a new access token
+        const newAccessToken = jwt.sign(
+          { userId: decodedRefresh.userId },
+          JWT_SECRET,
+          { expiresIn: '15m' }
+        );
+
+        // 👉 Send it back so frontend can update
+        res.setHeader('x-access-token', newAccessToken);
+
+        return next();
+      } catch (refreshErr) {
+        return res.status(401).json({ error: 'Invalid refresh token' });
+      }
+    }
+    return res.status(401).json({ error: 'Invalid or expired access token' });
   }
 };
+
 
 // Create payment
 app.post('/payments', authenticate, async (req: AuthRequest, res: Response) => {
